@@ -30,9 +30,15 @@ class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        # if config.q_equal_k is defined take it otherwise False
+        self.q_equal_k = getattr(config, 'q_equal_k', False)
         assert config.n_embd % config.n_head == 0
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
+        if self.q_equal_k:
+            print("WARNING: using q_equal_k mode. This is a special mode for research.")
+            self.c_attn = nn.Linear(config.n_embd, 2 * config.n_embd, bias=config.bias)
+        else:
+            self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
         # output projection
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
@@ -53,7 +59,11 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
+        if self.q_equal_k:
+            k, v  = self.c_attn(x).split(self.n_embd, dim=2)
+            q = k
+        else:
+            q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -114,7 +124,8 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
-
+    q_equal_k: bool = False # Assumes Q = K, a special mode for research
+    
 class GPT(nn.Module):
 
     def __init__(self, config):
@@ -146,7 +157,10 @@ class GPT(nn.Module):
 
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
-
+        # report model structure # parameters per layer
+        # from torchsummary import summary
+        # summary(self, input_size = (config.block_size, ))
+        
     def get_num_params(self, non_embedding=True):
         """
         Return the number of parameters in the model.
